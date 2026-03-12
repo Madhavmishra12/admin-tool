@@ -110,7 +110,7 @@ export default function CandidateManagementPage() {
 
   const { toast } = useToast();
 
-  // Build login link using current origin so it works on any domain (Vercel, Lovable, etc.)
+  // Build login link using current origin so it works on any domain (Vercel, etc.)
   const getLoginLink = (token: string) => `${window.location.origin}/magic-login?token=${token}`;
 
   const getMagicToken = (candidate: MockUser): string | null => {
