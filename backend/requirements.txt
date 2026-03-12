@@ -9,3 +9,5 @@ sqlalchemy
 psycopg2-binary
 python-dotenv
 resend
+redis
+fastapi-cache2[redis]

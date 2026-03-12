@@ -21,6 +21,12 @@ import models
 load_dotenv()
 resend.api_key = os.getenv("RESEND_API_KEY")
 
+# Redis Caching Imports
+from redis import asyncio as aioredis
+from fastapi_cache import FastAPICache
+from fastapi_cache.backends.redis import RedisBackend
+from fastapi_cache.decorator import cache
+
 # Create tables
 models.Base.metadata.create_all(bind=engine)
 
@@ -37,6 +43,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.on_event("startup")
+async def startup():
+    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    try:
+        redis = aioredis.from_url(redis_url, encoding="utf8", decode_responses=True)
+        FastAPICache.init(RedisBackend(redis), prefix="fastapi-cache")
+        print(f">>> Redis cache initialized at {redis_url}")
+    except Exception as e:
+        print(f"!!! Failed to initialize Redis cache: {str(e)}")
 
 # Initialization helper
 def seed_initial_data():
@@ -108,16 +124,6 @@ class ProfileUpdate(BaseModel):
     experience: Optional[List[Dict[str, Any]]] = None
     social_links: Optional[Dict[str, Any]] = None
 
-app = FastAPI(title="GrowQR Admin API (Mock)")
-
-# CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=['*'],
-    allow_credentials=True,
-    allow_methods=['*'],
-    allow_headers=['*'],
-)
 
 def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode()).hexdigest()
@@ -289,6 +295,9 @@ def signup(req: Dict[str, Any], db: Session = Depends(get_db)):
     db.commit()
     db.refresh(new_user)
 
+    # Invalidate cache
+    FastAPICache.clear(namespace="fastapi-cache")
+
     token = 'jwt-token-' + str(uuid.uuid4())
     return {
         'success': True,
@@ -380,10 +389,14 @@ def reset_database(db: Session = Depends(get_db)):
     db.query(models.User).delete()
     db.commit()
     seed_initial_data()
+    
+    # Invalidate cache
+    FastAPICache.clear(namespace="fastapi-cache")
     return {"success": True, "message": "Database cleared and seeded successfully"}
 
 # === DASHBOARD STATS ===
 @app.get('/api/dashboard/stats')
+@cache(expire=300) # Cache for 5 minutes
 def get_dashboard_stats(db: Session = Depends(get_db)):
     users = db.query(models.User).all()
     total = len(users)
@@ -475,6 +488,9 @@ def create_user(user: UserCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(db_user)
     
+    # Invalidate cache
+    FastAPICache.clear(namespace="fastapi-cache")
+    
     return {
         'success': True, 
         'id': db_user.id,
@@ -495,6 +511,9 @@ def update_user(user_id: int, user: UserCreate, db: Session = Depends(get_db)):
         setattr(db_user, key, value)
     
     db.commit()
+
+    # Invalidate cache
+    FastAPICache.clear(namespace="fastapi-cache")
     return {'success': True}
 
 @app.delete('/api/users/{user_id}')
@@ -503,6 +522,8 @@ def delete_user(user_id: int, db: Session = Depends(get_db)):
     if db_user:
         db.delete(db_user)
         db.commit()
+        # Invalidate cache
+        FastAPICache.clear(namespace="fastapi-cache")
         return {'success': True}
     raise HTTPException(status_code=404, detail='User not found')
 
@@ -697,7 +718,7 @@ async def bulk_resume_upload(background_tasks: BackgroundTasks, files: List[Uplo
             "email_sent": True
         })
 
-    return {
+    response = {
         "success": True,
         "summary": {
             "total": len(files),
@@ -707,6 +728,10 @@ async def bulk_resume_upload(background_tasks: BackgroundTasks, files: List[Uplo
         },
         "results": results
     }
+    
+    # Invalidate cache
+    FastAPICache.clear(namespace="fastapi-cache")
+    return response
 
 # === USER PROFILE CRUD ===
 
